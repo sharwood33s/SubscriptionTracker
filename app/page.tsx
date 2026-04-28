@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
 type Subscription = {
   id: number;
@@ -11,25 +11,91 @@ type Subscription = {
   memo: string;
 };
 
+const STORAGE_KEY = "subscriptions";
+const STORAGE_UPDATE_EVENT = "subscriptions-updated";
+const EMPTY_SUBSCRIPTIONS: Subscription[] = [];
+
+let cachedRawSubscriptions: string | null = null;
+let cachedSubscriptions: Subscription[] = EMPTY_SUBSCRIPTIONS;
+
+const parseSubscriptions = (value: string | null): Subscription[] => {
+  if (!value) {
+    return EMPTY_SUBSCRIPTIONS;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (!Array.isArray(parsed)) {
+      return EMPTY_SUBSCRIPTIONS;
+    }
+
+    return parsed.filter((subscription): subscription is Subscription => {
+      return (
+        typeof subscription?.id === "number" &&
+        typeof subscription.name === "string" &&
+        typeof subscription.price === "number" &&
+        typeof subscription.category === "string" &&
+        typeof subscription.renewalDate === "string" &&
+        typeof subscription.memo === "string"
+      );
+    });
+  } catch {
+    return EMPTY_SUBSCRIPTIONS;
+  }
+};
+
+const getStoredSubscriptions = () => {
+  if (typeof window === "undefined") {
+    return EMPTY_SUBSCRIPTIONS;
+  }
+
+  const rawSubscriptions = window.localStorage.getItem(STORAGE_KEY);
+
+  if (rawSubscriptions === cachedRawSubscriptions) {
+    return cachedSubscriptions;
+  }
+
+  cachedRawSubscriptions = rawSubscriptions;
+  cachedSubscriptions = parseSubscriptions(rawSubscriptions);
+
+  return cachedSubscriptions;
+};
+
+const subscribeToStoredSubscriptions = (onStoreChange: () => void) => {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(STORAGE_UPDATE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(STORAGE_UPDATE_EVENT, onStoreChange);
+  };
+};
+
+const saveSubscriptions = (subscriptions: Subscription[]) => {
+  const rawSubscriptions = JSON.stringify(subscriptions);
+
+  cachedRawSubscriptions = rawSubscriptions;
+  cachedSubscriptions = subscriptions;
+  window.localStorage.setItem(STORAGE_KEY, rawSubscriptions);
+  window.dispatchEvent(new Event(STORAGE_UPDATE_EVENT));
+};
+
 export default function Home() {
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const subscriptions = useSyncExternalStore(
+    subscribeToStoredSubscriptions,
+    getStoredSubscriptions,
+    () => EMPTY_SUBSCRIPTIONS,
+  );
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState("");
   const [renewalDate, setRenewalDate] = useState("");
   const [memo, setMemo] = useState("");
-
-  useEffect(() => {
-    const saved = localStorage.getItem("subscriptions");
-
-    if (saved) {
-      setSubscriptions(JSON.parse(saved));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("subscriptions", JSON.stringify(subscriptions));
-  }, [subscriptions]);
 
   const totalMonthly = useMemo(() => {
     return subscriptions.reduce((sum, sub) => sum + sub.price, 0);
@@ -49,7 +115,7 @@ export default function Home() {
       memo,
     };
 
-    setSubscriptions([...subscriptions, newSubscription]);
+    saveSubscriptions([...subscriptions, newSubscription]);
     setName("");
     setPrice("");
     setCategory("");
@@ -58,7 +124,7 @@ export default function Home() {
   };
 
   const deleteSubscription = (id: number) => {
-    setSubscriptions(subscriptions.filter((sub) => sub.id !== id));
+    saveSubscriptions(subscriptions.filter((sub) => sub.id !== id));
   };
 
   return (
