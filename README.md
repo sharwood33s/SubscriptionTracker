@@ -55,3 +55,7 @@ npm run lint
 - React
 - TypeScript
 - Tailwind CSS
+
+## ライセンス
+
+MIT License
